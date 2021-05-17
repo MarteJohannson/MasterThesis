@@ -1,0 +1,513 @@
+---
+title: '3.0'
+author: "Marte Johannson"
+date: "5/10/2021"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r Packages, echo = FALSE, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(readxl)
+library(lme4)
+library(emmeans)
+library(lmerTest)
+library(cowplot)
+library(dplyr)
+library(ggplot2)
+```
+
+# CSA
+
+```{R Data set, IHC, echo = FALSE, message = FALSE}
+#Download dataset
+IHC <- read_excel("IHC_Results.xlsx",
+                  na = "NA",
+                  sheet = "Ark1")
+```
+
+
+
+## Muscle fiber type I
+
+```{r P1 - TypeI and II - Means plot + 95_CI}
+fig2 <-IHC %>%
+  filter(reps!=30) %>%
+  dplyr::select(subject:sex) %>%
+  pivot_longer(names_to = "fibertype", 
+               values_to = "area", 
+               cols = mfa_f1:mfa_f2) %>%
+  group_by(timepoint, fibertype) %>%
+  pivot_wider(values_from = "area",
+              names_from = "timepoint") %>%
+  rename(PreSup = `1`,
+         Pre = `2`,
+         Post = `4`) %>%
+  pivot_longer(names_to = "timepoint",
+               values_to = "area",
+               cols = PreSup:Post) %>%
+  group_by(timepoint, fibertype) %>%
+  summarise(m = mean(area, na.rm = TRUE), 
+            s = sd(area, na.rm = TRUE),
+                   timepoint = factor (timepoint, levels = c("PreSup", "Pre", "Post"))) %>%
+  select(fibertype, m, s) %>%
+    ggplot(aes(timepoint, m)) + 
+  geom_errorbar(mapping = aes(ymin = m - s, ymax = m + s), 
+                position = position_dodge(width = 0.2),
+                width = 0.5) +
+  geom_point(position = position_dodge(width = 0.2)) +
+facet_grid("fibertype") 
+
+plot(fig2)
+```
+
+```{r FT1 and FT2 Composition}
+Comp_f1_f2 <-IHC %>%
+  filter(reps!=30) %>%
+  pivot_longer(names_to = "Percentage", 
+               values_to = "area", 
+               cols = `%_f1`:`%_f2`) %>%
+  group_by(timepoint, Percentage) %>%
+  pivot_wider(values_from = "area",
+              names_from = "timepoint") %>%
+  rename(PreSup = `1`,
+         Pre = `2`,
+         Post = `4`) %>%
+  pivot_longer(names_to = "timepoint",
+               values_to = "area",
+               cols = PreSup:Post) %>%
+  group_by(timepoint, Percentage) %>%
+  summarise(m = mean(area, na.rm = TRUE), 
+            s = sd(area, na.rm = TRUE),
+                   timepoint = factor (timepoint, levels = c("PreSup", "Pre", "Post"))) %>%
+  select(Percentage, m, s) %>%
+    ggplot(aes(timepoint, m)) + 
+  geom_errorbar(aes(ymin = m - s, ymax = m + s), 
+                position = position_dodge(width = 0.2)) +
+  geom_point(position = position_dodge(width = 0.2)) +
+facet_grid("Percentage") 
+
+plot(Comp_f1_f2)
+```
+
+```{r TypeI - T1-T4 % change CSA per subject, echo= FALSE, message = FALSE, warning = FALSE, fig.keep='all'}
+IHC1 <- IHC %>%
+  select(subject, BMI, timepoint, mfa_f1, leg, reps) %>%
+  filter(!is.na(mfa_f1))%>%
+  filter(reps!=30)%>%
+  group_by(subject)%>%
+  pivot_wider(names_from = timepoint,
+              values_from = mfa_f1)%>%
+  select(subject, reps, `1`, `2`, `4`, BMI)%>%
+  mutate(percent_change = (((`4` / `2`)-1)*100))
+
+print(IHC1)
+```
+
+```{r P2 - A TypeI - T2-T4 percentage change CSA v. BMI Reg}
+fig1 <- IHC %>%
+  select(subject, BMI, timepoint, mfa_f1, leg, reps) %>%
+  filter(!is.na(mfa_f1))%>%
+  filter(reps!=30)%>%
+  group_by(subject)%>%
+  pivot_wider(names_from = timepoint,
+              values_from = mfa_f1)%>%
+  select(subject, BMI, reps, `1`, `2`, `4`)%>%
+  mutate(percent_change = (((`4` / `2`)-1)*100)) %>%
+  ggplot(aes(x = BMI, y = percent_change)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, color = "black", fill = "orange") +
+  scale_x_continuous(name = "") +
+  scale_y_continuous(name = "% Change CSA Type I")
+
+fig1
+```
+
+
+
+```{r descriptive-ihc}
+
+D <- IHC %>%
+  filter(reps!=30) %>%
+  dplyr::select(subject:sex) %>%
+  pivot_longer(names_to = "fibertype", 
+               values_to = "area", 
+               cols = mfa_f1:mfa_f2) %>%
+  group_by(timepoint, Group, sex, fibertype) %>%
+  summarise(m = mean(area, na.rm = TRUE), 
+            s = sd(area, na.rm = TRUE)) %>%
+  ggplot(aes(timepoint, m, color = Group, shape = sex)) + 
+  geom_errorbar(aes(ymin = m - s, ymax = m + s), 
+                position = position_dodge(width = 0.2)) +
+  geom_point(position = position_dodge(width = 0.2)) +
+  facet_grid(sex ~ fibertype)
+```
+
+
+```{r TypeI - Regression of fig1}
+Reg1 <- IHC %>%
+  select(subject, timepoint, mfa_f1, reps, Group, BMI) %>%
+  filter(reps!=30) %>%
+  filter(!is.na(mfa_f1)) %>%
+  pivot_wider(names_from = timepoint,
+              values_from = mfa_f1) %>%
+  select(subject, `2`, `4`, BMI, Group) %>%
+  rowwise() %>%
+  mutate(baseline = `2`,
+         change = log(`4`)- log(baseline))
+    
+
+m1 <- lm(change ~  baseline + Group, data = Reg1)
+
+summary(m1)
+```
+
+```{r B TypeI - Predicted change CSA vs BMI}
+dat1 <- IHC %>%
+  select(subject, timepoint, mfa_f1, reps, BMI, sex) %>%
+  filter(reps!=30)%>%
+  filter(!is.na(mfa_f1))%>%
+  pivot_wider(names_from = timepoint,
+              values_from = mfa_f1) %>%
+  select(subject, `1`, `2`, `4`, BMI, sex) %>%     
+       pivot_longer(names_to = "Time",
+                    values_to = "csa",
+                    cols = (`1`:`4`)) %>%
+mutate(time = if_else(Time == 2, "T2", 
+                      if_else(Time == 4, "T4", "T1")))
+
+m2 <- lmer(log(csa) ~ time * BMI + (1 | subject), data = dat1)
+
+summary(m2)
+
+m2rg = ref_grid(m2, at = list(BMI = c(20, 25, 30, 35)))
+
+pred1 <- emmip(m2rg, BMI ~ time, cov.reduce = range, type = "response", CIs = TRUE) +
+  labs(x = "", y = "Predicted change (µm)")
+
+pred1
+```
+
+
+## Muscle fiber type II
+
+```{r TypeII - T1-T4 % change CSA per subject, echo= FALSE, message = FALSE, warning = FALSE, fig.keep='all'}
+IHC2 <- IHC %>%
+  select(subject, BMI, timepoint, mfa_f2, leg, reps) %>%
+  filter(!is.na(mfa_f2))%>%
+  filter(reps!=30)%>%
+  group_by(subject)%>%
+  pivot_wider(names_from = timepoint,
+              values_from = mfa_f2)%>%
+  select(subject, reps, `1`, `2`, `4`, BMI)%>%
+  mutate(percent_change = (((`4` / `2`)-1)*100))
+```
+
+```{r C TypeII -  T2-T4 percentage change CSA v. BMI}
+fig3 <- IHC %>%
+  select(subject, BMI, timepoint, mfa_f2, leg, reps) %>%
+  filter(!is.na(mfa_f2))%>%
+  filter(reps!=30)%>%
+  group_by(subject)%>%
+  pivot_wider(names_from = timepoint,
+              values_from = mfa_f2)%>%
+  select(subject, BMI, reps, `1`, `2`, `4`)%>%
+  mutate(percent_change = (((`4` / `2`)-1)*100)) %>%
+  ggplot(aes(x = BMI, y = percent_change)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, color = "black", fill = "orange") +
+  scale_x_continuous(name = "BMI") +
+  scale_y_continuous(name = "% Change CSA Type II")
+
+fig3
+```
+
+```{r TypeII - Regression of fig1}
+Reg2 <- IHC %>%
+  select(subject, timepoint, mfa_f2, reps, Group, BMI) %>%
+  filter(reps!=30) %>%
+  filter(!is.na(mfa_f2)) %>%
+  pivot_wider(names_from = timepoint,
+              values_from = mfa_f2) %>%
+  select(subject, `2`, `4`, BMI, Group) %>%
+  rowwise() %>%
+  mutate(baseline = `2`,
+         change = log(`4`)- log(baseline))
+    
+
+m2 <- lm(change ~  baseline + Group, data = Reg2)
+
+summary(m2)
+```
+
+```{r D TypeII - Predicted change CSA vs BMI}
+dat2 <- IHC %>%
+  select(subject, timepoint, mfa_f2, reps, BMI, sex) %>%
+  filter(reps!=30)%>%
+  filter(!is.na(mfa_f2))%>%
+  pivot_wider(names_from = timepoint,
+              values_from = mfa_f2) %>%
+  select(subject, `1`, `2`, `4`, BMI, sex) %>%     
+  pivot_longer(names_to = "Time",
+               values_to = "csa",
+               cols = (`1`:`4`)) %>%
+mutate(time = if_else(Time == 2, "T2", 
+                      if_else(Time == 4, "T4", "T1")))
+
+m3 <- lmer(log(csa) ~ time * BMI + (1 | subject), data = dat2)
+
+summary(m3)
+
+m3rg = ref_grid(m3, at = list(BMI = c(20, 25, 30, 35)))
+pred2 <- emmip(m3rg, BMI ~ time, cov.reduce = range, type = "response", CIs = TRUE)  +
+  labs(x = "Timepoint", y = "Predicted change (µm)")
+
+pred2
+```
+
+## Plotgrid
+```{r Plotgrid CSA}
+
+CSA_plotgrid <- plot_grid(fig1, pred1, fig3, pred2, labels = c('A', 'B', 'C', 'D'))
+
+CSA_plotgrid
+```
+
+
+# Ultrasound
+```{r Data set, Ultrasound}
+UL <- read_excel("UL_Results.xlsx", na="NA", sheet = "Ark1")
+```
+
+```{r Reg percentage change BMI v. VLMT}
+fig3 <- UL %>%
+  select(subject, timepoint, BMI, reps, VL) %>%
+  filter(reps!=30) %>%
+  group_by(subject) %>%
+  pivot_wider(names_from = timepoint, 
+              values_from = VL) %>%
+  select(subject, BMI, reps, `1`, `2`, `4`) %>%
+  mutate(percent_change = (((`4` / `2`)-1)*100)) %>%
+  ggplot(aes(x = BMI, y = percent_change)) +
+  geom_point() + 
+  geom_smooth(method = "lm", se = TRUE, color = "black", fill = "orange") + 
+  scale_x_continuous(name = "BMI") +
+  scale_y_continuous(name = "% Change") +
+  ggtitle("VL muscle thickness vs BMI") +
+  theme(plot.title = element_text(hjust = 0.45))
+
+fig3
+```
+
+```{r Regression of fig3?}
+Reg3 <- UL %>%
+  select(subject, timepoint, BMI, reps, VL) %>%
+  filter(reps!=30) %>%
+  filter(!is.na(VL)) %>%
+  pivot_wider(names_from = timepoint,
+              values_from = VL) %>%
+  select(subject, `2`, `4`, BMI) %>%
+  rowwise() %>%
+  mutate(baseline = `2`,
+         change = log(`4`)- log(baseline))
+    
+
+m4 <- lm(change ~  BMI, data = Reg3)
+
+summary(m4)
+```
+
+```{r US - Means plot + CI}
+UL_Means <-UL %>%
+  filter(reps!=30) %>%
+  pivot_longer(names_to = "Means", 
+               values_to = "area", 
+               cols = VL) %>%
+  group_by(timepoint, Means) %>%
+  pivot_wider(values_from = "area",
+              names_from = "timepoint") %>%
+  rename(PreSup = `1`,
+         Pre = `2`,
+         Post = `4`) %>%
+  pivot_longer(names_to = "timepoint",
+               values_to = "area",
+               cols = PreSup:Post) %>%
+  group_by(timepoint, Means) %>%
+  summarise(m = mean(area, na.rm = TRUE), 
+            s = sd(area, na.rm = TRUE),
+                   timepoint = factor (timepoint, levels = c("PreSup", "Pre", "Post"))) %>%
+  select(Means, m, s) %>%
+    ggplot(aes(timepoint, m)) + 
+  geom_errorbar(mapping = aes(ymin = m - s, ymax = m + s), 
+                position = position_dodge(width = 1),
+                width = 0.5) +
+  geom_point(position = position_dodge(width = 1)) +
+facet_grid("Means") 
+
+plot(UL_Means)
+
+?geom_errorbar
+```
+
+
+# Isokinetic strength
+```{r Data set, ISO, echo= FALSE, message = FALSE, warning = FALSE, fig.keep='all' }
+Iso_Results <- read_excel("Iso_Results.xlsx", na="NA", sheet = "Rådata")
+```
+
+## Isometric
+
+Percentage change of peak torque at isometric according to BMI
+```{r A percentage change - LR, BMI v. pt0, warning = FALSE, message = FALSE, echo= FALSE, fig.keep='all'}
+fig4 <- Iso_Results %>%
+  select(subject, reps, BMI, timepoint, pt0) %>%
+  filter(reps!=30) %>%
+  group_by(subject) %>%
+  pivot_wider(names_from = timepoint, 
+              values_from = pt0) %>%
+  select(subject, BMI, reps, `1`, `2`, `4`) %>%
+  mutate(percent_change = ((`4`/`2`)-1)*100) %>%
+  ggplot(aes(x = BMI, y = percent_change)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, color = "black", fill = "orange") +
+  scale_x_continuous(name = "BMI") +
+  scale_y_continuous(name = "% Change") +
+  ggtitle("Peak torque 0° vs BMI") +
+  theme(plot.title = element_text(hjust = 0.45)) 
+
+fig4
+```
+
+```{r Regression fig4}
+Reg4 <- Iso_Results %>%
+  select(subject, reps, BMI, timepoint, pt0) %>%
+  filter(reps!=30) %>%
+  group_by(subject) %>%
+  pivot_wider(names_from = timepoint, 
+              values_from = pt0) %>%
+  select(subject, BMI, reps, `1`, `2`, `4`) %>%
+  mutate(percent_change = ((`4`/`2`)-1)*100)
+
+Fit.Iso0 <- lm(percent_change ~ BMI, data = Reg4)
+       
+summary(Fit.Iso0)
+```
+
+```{r Iso0 - Means plot + CI}
+Iso0_Mean <-Iso_Results %>%
+  filter(reps!=30) %>%
+  pivot_longer(names_to = "Means", 
+               values_to = "area", 
+               cols = pt0) %>%
+  group_by(timepoint, Means) %>%
+  pivot_wider(values_from = "area",
+              names_from = "timepoint") %>%
+  rename(PreSup = `1`,
+         Pre = `2`,
+         Post = `4`) %>%
+  pivot_longer(names_to = "timepoint",
+               values_to = "area",
+               cols = PreSup:Post) %>%
+  group_by(timepoint, Means) %>%
+  summarise(m = mean(area, na.rm = TRUE), 
+            s = sd(area, na.rm = TRUE),
+                   timepoint = factor (timepoint, levels = c("PreSup", "Pre", "Post"))) %>%
+  select(Means, m, s) %>%
+    ggplot(aes(timepoint, m)) + 
+  geom_errorbar(mapping = aes(ymin = m - s, ymax = m + s), 
+                position = position_dodge(width = 1),
+                width = 0.5) +
+  geom_point(position = position_dodge(width = 1)) +
+facet_grid("Means") 
+
+plot(Iso0_Mean)
+```
+
+## 240
+
+Percentage change of peak torque at 240 degrees per second according to BMI
+
+
+```{r B percentage change - LR, BMI v. pt240, warning = FALSE, message = FALSE, echo= FALSE, fig.keep='all'}
+fig5 <- Iso_Results %>%
+  select(subject, reps, BMI, timepoint, pt240) %>%
+  filter(reps!=30) %>%
+  group_by(subject) %>%
+  pivot_wider(names_from = timepoint, 
+              values_from = pt240) %>%
+  select(subject, BMI, reps, `1`, `2`, `4`) %>%
+  mutate(percent_change = ((`4`/`2`)-1)*100) %>%
+  ggplot(aes(x = BMI, y = percent_change)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, color = "black", fill = "orange") +
+  scale_x_continuous(name = "BMI") +
+  scale_y_continuous(name = "") +
+  ggtitle("Peak torque 240° vs BMI") +
+  theme(plot.title = element_text(hjust = 0.45))
+
+plot(fig5)
+```
+
+```{r Regression fig5}
+Reg5 <- Iso_Results %>%
+  select(subject, reps, BMI, timepoint, pt240) %>%
+  filter(reps!=30) %>%
+  group_by(subject) %>%
+  pivot_wider(names_from = timepoint, 
+              values_from = pt240) %>%
+  select(subject, BMI, reps, `1`, `2`, `4`) %>%
+  mutate(percent_change = ((`4`/`2`)-1)*100)
+       
+Fit.Iso240 <- lm(percent_change ~ BMI, data = Reg5)
+       
+summary(Fit.Iso240)       
+```
+
+```{r Iso240 - Means plot + CI}
+Iso240_Mean <-Iso_Results %>%
+  filter(reps!=30) %>%
+  pivot_longer(names_to = "Means", 
+               values_to = "area", 
+               cols = pt240) %>%
+  group_by(timepoint, Means) %>%
+  pivot_wider(values_from = "area",
+              names_from = "timepoint") %>%
+  rename(PreSup = `1`,
+         Pre = `2`,
+         Post = `4`) %>%
+  pivot_longer(names_to = "timepoint",
+               values_to = "area",
+               cols = PreSup:Post) %>%
+  group_by(timepoint, Means) %>%
+  summarise(m = mean(area, na.rm = TRUE), 
+            s = sd(area, na.rm = TRUE),
+                   timepoint = factor (timepoint, levels = c("PreSup", "Pre", "Post"))) %>%
+  select(Means, m, s) %>%
+    ggplot(aes(timepoint, m)) + 
+  geom_errorbar(aes(ymin = m - s, ymax = m + s), 
+                position = position_dodge(width = 1)) +
+  geom_point(position = position_dodge(width = 1)) +
+facet_grid("Means") 
+
+plot(Iso240_Mean)
+```
+
+```{r Plotgrid, percentage change ISO}
+
+ISO_plotgrid <- plot_grid(fig4, fig5, labels = c('A', 'B'))
+
+ISO_plotgrid
+```
+
+```{r Plotgrid, Means plot ISO}
+
+ISO_plotgrid <- plot_grid(Iso0_Mean, Iso240_Mean,
+                          labels = c('A', 'B'),
+                          label_fontfamily = "Times New Roman")
+
+ISO_plotgrid
+```
